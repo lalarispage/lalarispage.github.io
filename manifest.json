@@ -1,0 +1,21 @@
+{
+    "name": "WhatsDeliver Store",
+    "short_name": "WhatsDeliver",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#4CAF50",
+    "description": "Toko Online WhatsApp Terpercaya",
+    "icons": [
+        {
+            "src": "https://blogger.googleusercontent.com/img/a/AVvXsEj_ufbmv6p9THXc8bw1c_OZCuLvGu0ivWv1ioksKCFAgn5SSkI6Qcyn9oTDJAOidn78wyhhw2cp-tZSq5hpcKiuQ1pfsC2jXg1-HqR--qNiz5CLb8Hj3DPfDFlwboXcBv0W0fCccoc5XUFljA1KPL3xrIEKSAuhPXlYsqH4cHa7_EpCwPRgdw-50UYonZ5a=s192",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "https://blogger.googleusercontent.com/img/a/AVvXsEj_ufbmv6p9THXc8bw1c_OZCuLvGu0ivWv1ioksKCFAgn5SSkI6Qcyn9oTDJAOidn78wyhhw2cp-tZSq5hpcKiuQ1pfsC2jXg1-HqR--qNiz5CLb8Hj3DPfDFlwboXcBv0W0fCccoc5XUFljA1KPL3xrIEKSAuhPXlYsqH4cHa7_EpCwPRgdw-50UYonZ5a=s512",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ]
+}
