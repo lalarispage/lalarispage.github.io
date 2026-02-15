@@ -1,99 +1,33 @@
-// Service Worker untuk PWA - DENGAN OPSI REAL-TIME
-// Mix strategy: Real-time untuk data penting, cache untuk assets
+// Service Worker untuk PWA Toko Online - AUTO UPDATE VERSION
+// Cache akan otomatis update tanpa perlu ubah versi manual
 
-const CACHE_VERSION = 'v1';
+// Gunakan timestamp atau hash untuk auto-versioning
+const CACHE_VERSION = 'v1'; // Hanya ubah ini jika ingin force update
 const CACHE_NAME = `toko-online-${CACHE_VERSION}-${self.registration.scope}`;
 const OFFLINE_URL = '/offline.html';
 
-// ========== KONFIGURASI CACHE PER TIPE KONTEN ==========
+// Strategy: Stale While Revalidate - selalu ambil dari cache dulu, update di background
+const CACHE_STRATEGY = 'stale-while-revalidate'; // atau 'network-first' atau 'cache-first'
 
-const CACHE_SETTINGS = {
-  // REAL-TIME - Tidak di-cache, selalu ambil dari network
-  realtime: {
-    age: 0, // 0 = no cache
-    strategy: 'network-only',
-    patterns: [
-      '/search/label/promo',      // Halaman promo (harga sering berubah)
-      '/search/label/flash-sale', // Flash sale
-      '/p/stock-availability',    // Stock availability
-      'api.example.com/price'     // API harga real-time (jika ada)
-    ]
-  },
-  
-  // VERY FAST - Update setiap 1 menit
-  veryFast: {
-    age: 1 * 60 * 1000, // 1 menit
-    strategy: 'stale-while-revalidate',
-    patterns: [
-      '/search/label/new',        // Produk baru
-      '/p/best-seller'            // Best seller (sering berubah ranking)
-    ]
-  },
-  
-  // FAST - Update setiap 5-15 menit
-  fast: {
-    age: 5 * 60 * 1000, // 5 menit
-    strategy: 'stale-while-revalidate',
-    patterns: [
-      '/',                        // Homepage
-      '/search/label/',           // Halaman kategori
-      '.html'                     // Semua halaman HTML
-    ]
-  },
-  
-  // MEDIUM - Update setiap 1 jam
-  medium: {
-    age: 60 * 60 * 1000, // 1 jam
-    strategy: 'stale-while-revalidate',
-    patterns: [
-      '/p/about',                 // Halaman about
-      '/p/contact',               // Halaman contact
-      '/p/terms'                  // Terms & conditions
-    ]
-  },
-  
-  // STATIC - Cache lama (7 hari)
-  static: {
-    age: 7 * 24 * 60 * 60 * 1000, // 7 hari
-    strategy: 'cache-first',
-    patterns: [
-      '.css',
-      '.js',
-      '.woff',
-      '.woff2',
-      '.ttf',
-      'bootstrap',
-      'jquery',
-      'leaflet'
-    ]
-  },
-  
-  // IMAGES - Cache lama (30 hari)
-  images: {
-    age: 30 * 24 * 60 * 60 * 1000, // 30 hari
-    strategy: 'cache-first',
-    patterns: [
-      '.jpg',
-      '.jpeg',
-      '.png',
-      '.gif',
-      '.webp',
-      '.svg',
-      'blogspot.com',
-      'bp.blogspot.com'
-    ]
-  }
-};
+// Max cache age (dalam milidetik) - cache otomatis expire setelah waktu ini
+const MAX_CACHE_AGE = 24 * 60 * 60 * 1000; // 24 jam
 
-// Daftar URL yang tidak perlu di-cache
+// Daftar file yang akan di-cache saat install (static assets)
+const staticAssets = [
+  '/',
+  '/offline.html',
+  'https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css',
+  'https://code.jquery.com/jquery-3.5.1.slim.min.js',
+  'https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js'
+];
+
+// File yang tidak perlu di-cache
 const EXCLUDED_URLS = [
   '/blogger_dynamic',
   '/b/post-preview',
   'google-analytics.com',
   'googletagmanager.com',
-  'doubleclick.net',
-  'pagead',
-  'adsense'
+  'doubleclick.net'
 ];
 
 // ========== INSTALL SERVICE WORKER ==========
@@ -103,11 +37,16 @@ self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('✅ Service Worker: Caching offline page');
-        return cache.add(OFFLINE_URL);
+        console.log('✅ Service Worker: Caching static assets');
+        return cache.addAll(staticAssets.map(url => new Request(url, {cache: 'reload'})));
       })
-      .then(() => self.skipWaiting())
-      .catch(err => console.error('❌ Install failed:', err))
+      .then(() => {
+        console.log('✅ Service Worker: Skip waiting - activate immediately');
+        return self.skipWaiting(); // Activate immediately, jangan tunggu tab ditutup
+      })
+      .catch(err => {
+        console.error('❌ Service Worker: Cache installation failed', err);
+      })
   );
 });
 
@@ -117,131 +56,81 @@ self.addEventListener('activate', event => {
   
   event.waitUntil(
     Promise.all([
+      // Hapus cache lama
       caches.keys().then(cacheNames => {
         return Promise.all(
           cacheNames.map(cacheName => {
             if (cacheName !== CACHE_NAME) {
-              console.log('🗑️ Deleting old cache:', cacheName);
+              console.log('🗑️ Service Worker: Deleting old cache:', cacheName);
               return caches.delete(cacheName);
             }
           })
         );
       }),
+      // Claim semua clients
       self.clients.claim()
-    ])
+    ]).then(() => {
+      console.log('✅ Service Worker: Activated and ready!');
+    })
   );
 });
 
-// ========== FETCH HANDLER ==========
+// ========== FETCH STRATEGY ==========
 self.addEventListener('fetch', event => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip jika dalam excluded list
-  if (shouldSkipCache(url.href)) {
+  // Skip requests yang tidak perlu di-cache
+  if (shouldSkipCache(url)) {
     return;
   }
 
-  // Skip cross-origin kecuali CDN
-  if (!url.origin.includes(self.location.origin) && !isCDNResource(url.href)) {
+  // Skip cross-origin yang bukan CDN
+  if (!url.origin.includes(self.location.origin) && 
+      !isCDNResource(url.href)) {
     return;
   }
 
-  // Tentukan setting berdasarkan URL
-  const setting = getCacheSetting(url.href);
-  
-  // Pilih strategy berdasarkan setting
-  if (setting.strategy === 'network-only') {
-    event.respondWith(networkOnly(request));
-  } else if (setting.strategy === 'stale-while-revalidate') {
-    event.respondWith(staleWhileRevalidate(request, setting.age));
-  } else if (setting.strategy === 'cache-first') {
-    event.respondWith(cacheFirst(request, setting.age));
-  } else {
+  // Pilih strategy berdasarkan tipe request
+  if (CACHE_STRATEGY === 'stale-while-revalidate') {
+    event.respondWith(staleWhileRevalidate(request));
+  } else if (CACHE_STRATEGY === 'network-first') {
     event.respondWith(networkFirst(request));
+  } else {
+    event.respondWith(cacheFirst(request));
   }
 });
 
-// ========== STRATEGIES ==========
-
-// Network Only - REAL-TIME (tidak di-cache)
-async function networkOnly(request) {
-  try {
-    console.log('🔴 REAL-TIME fetch (no cache):', request.url);
-    const response = await fetch(request);
-    return response;
-  } catch (error) {
-    console.log('❌ Network failed:', request.url);
-    if (request.mode === 'navigate') {
-      return caches.match(OFFLINE_URL);
-    }
-    return new Response('Offline', { status: 503 });
-  }
-}
-
-// Stale While Revalidate - RECOMMENDED
-async function staleWhileRevalidate(request, maxAge) {
+// ========== STRATEGY: Stale While Revalidate (REKOMENDASI) ==========
+// Selalu serve dari cache dulu (cepat), update cache di background
+async function staleWhileRevalidate(request) {
   const cache = await caches.open(CACHE_NAME);
   const cachedResponse = await cache.match(request);
 
-  // Fetch dari network untuk update cache
+  // Fetch dari network untuk update cache di background
   const fetchPromise = fetch(request)
     .then(async response => {
       if (response && response.status === 200) {
-        // Check cache age
-        if (cachedResponse) {
-          const cacheExpired = await checkCacheAge(cachedResponse, maxAge);
-          if (cacheExpired) {
-            console.log('🔄 Cache expired, updating:', request.url);
-            cache.put(request, response.clone());
-          }
-        } else {
-          // No cache, save it
-          console.log('💾 Caching new:', request.url);
+        // Check apakah cache sudah expired
+        const cacheExpired = await isCacheExpired(request);
+        if (cacheExpired) {
+          console.log('🔄 Updating cache for:', request.url);
           cache.put(request, response.clone());
         }
       }
       return response;
     })
     .catch(error => {
-      console.log('⚠️ Network failed:', request.url);
+      console.log('⚠️ Network failed for:', request.url);
       return null;
     });
 
-  // Return cache jika ada, atau tunggu network
+  // Return cache immediately (fast), atau tunggu network jika tidak ada cache
   return cachedResponse || fetchPromise || caches.match(OFFLINE_URL);
 }
 
-// Cache First - Untuk assets statis
-async function cacheFirst(request, maxAge) {
-  const cache = await caches.open(CACHE_NAME);
-  const cachedResponse = await cache.match(request);
-
-  if (cachedResponse) {
-    const expired = await checkCacheAge(cachedResponse, maxAge);
-    if (!expired) {
-      return cachedResponse;
-    }
-  }
-
-  try {
-    const response = await fetch(request);
-    if (response && response.status === 200) {
-      cache.put(request, response.clone());
-    }
-    return response;
-  } catch (error) {
-    if (cachedResponse) {
-      return cachedResponse;
-    }
-    if (request.mode === 'navigate') {
-      return caches.match(OFFLINE_URL);
-    }
-    return new Response('Offline', { status: 503 });
-  }
-}
-
-// Network First - Fallback
+// ========== STRATEGY: Network First ==========
+// Coba network dulu, fallback ke cache jika gagal
 async function networkFirst(request) {
   try {
     const response = await fetch(request);
@@ -252,52 +141,51 @@ async function networkFirst(request) {
     return response;
   } catch (error) {
     const cachedResponse = await caches.match(request);
-    return cachedResponse || caches.match(OFFLINE_URL);
+    if (cachedResponse) {
+      return cachedResponse;
+    }
+    if (request.mode === 'navigate') {
+      return caches.match(OFFLINE_URL);
+    }
+    return new Response('Offline', { status: 503 });
+  }
+}
+
+// ========== STRATEGY: Cache First ==========
+// Coba cache dulu, fallback ke network jika tidak ada
+async function cacheFirst(request) {
+  const cachedResponse = await caches.match(request);
+  if (cachedResponse) {
+    return cachedResponse;
+  }
+  
+  try {
+    const response = await fetch(request);
+    if (response && response.status === 200) {
+      const cache = await caches.open(CACHE_NAME);
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch (error) {
+    if (request.mode === 'navigate') {
+      return caches.match(OFFLINE_URL);
+    }
+    return new Response('Offline', { status: 503 });
   }
 }
 
 // ========== HELPER FUNCTIONS ==========
 
-// Dapatkan cache setting berdasarkan URL
-function getCacheSetting(url) {
-  // Check semua patterns
-  for (const [key, setting] of Object.entries(CACHE_SETTINGS)) {
-    for (const pattern of setting.patterns) {
-      if (url.includes(pattern)) {
-        console.log(`📋 Using ${key} strategy for:`, url);
-        return setting;
-      }
-    }
-  }
-  
-  // Default: fast
-  return CACHE_SETTINGS.fast;
-}
-
-// Check apakah cache sudah expired
-async function checkCacheAge(response, maxAge) {
-  if (maxAge === 0) return true; // Always expired if maxAge = 0
-  
-  const cachedDate = response.headers.get('date');
-  if (!cachedDate) return true;
-
-  const cacheTime = new Date(cachedDate).getTime();
-  const now = Date.now();
-  const age = now - cacheTime;
-
-  return age > maxAge;
-}
-
-// Check apakah URL harus di-skip
+// Check apakah URL perlu di-skip
 function shouldSkipCache(url) {
-  return EXCLUDED_URLS.some(excluded => url.includes(excluded));
+  return EXCLUDED_URLS.some(excluded => url.href.includes(excluded));
 }
 
-// Check apakah CDN resource
+// Check apakah URL adalah CDN resource
 function isCDNResource(url) {
   const cdnDomains = [
     'blogger.com',
-    'blogspot.com', 
+    'blogspot.com',
     'stackpath.bootstrapcdn.com',
     'code.jquery.com',
     'unpkg.com',
@@ -308,47 +196,62 @@ function isCDNResource(url) {
   return cdnDomains.some(domain => url.includes(domain));
 }
 
-// ========== MESSAGE HANDLER ==========
+// Check apakah cache sudah expired
+async function isCacheExpired(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cachedResponse = await cache.match(request);
+  
+  if (!cachedResponse) {
+    return true; // Tidak ada cache, perlu fetch
+  }
+
+  const cachedDate = cachedResponse.headers.get('date');
+  if (!cachedDate) {
+    return true; // Tidak ada tanggal, perlu update
+  }
+
+  const cacheTime = new Date(cachedDate).getTime();
+  const now = Date.now();
+  const age = now - cacheTime;
+
+  return age > MAX_CACHE_AGE; // Return true jika sudah expired
+}
+
+// ========== AUTO UPDATE SERVICE WORKER ==========
+// Check for updates setiap 1 jam
 self.addEventListener('message', event => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
-  
-  // Force update cache
-  if (event.data && event.data.type === 'FORCE_UPDATE') {
-    event.waitUntil(updateAllCaches());
+});
+
+// Notifikasi user jika ada update
+self.addEventListener('controllerchange', () => {
+  console.log('🔄 Service Worker: New version available!');
+});
+
+// ========== BACKGROUND SYNC (OPTIONAL) ==========
+self.addEventListener('sync', event => {
+  if (event.tag === 'sync-cart') {
+    event.waitUntil(syncCart());
   }
 });
 
-// Force update semua cache
-async function updateAllCaches() {
-  console.log('🔄 Force updating all caches...');
-  const cache = await caches.open(CACHE_NAME);
-  const requests = await cache.keys();
-  
-  return Promise.all(
-    requests.map(async request => {
-      try {
-        const response = await fetch(request);
-        if (response && response.status === 200) {
-          await cache.put(request, response);
-          console.log('✅ Updated:', request.url);
-        }
-      } catch (error) {
-        console.log('⚠️ Failed to update:', request.url);
-      }
-    })
-  );
+function syncCart() {
+  console.log('🔄 Background sync: Syncing cart...');
+  // Implementasi sinkronisasi keranjang belanja
+  return Promise.resolve();
 }
 
-// ========== PUSH NOTIFICATION ==========
+// ========== PUSH NOTIFICATION (OPTIONAL) ==========
 self.addEventListener('push', event => {
   const options = {
-    body: event.data ? event.data.text() : 'Ada update baru!',
+    body: event.data ? event.data.text() : 'Notifikasi baru dari Toko Online',
     icon: 'icon-192x192.png',
     badge: 'icon-72x72.png',
     vibrate: [200, 100, 200],
-    tag: 'notification'
+    tag: 'notification',
+    requireInteraction: false
   };
 
   event.waitUntil(
@@ -358,10 +261,36 @@ self.addEventListener('push', event => {
 
 self.addEventListener('notificationclick', event => {
   event.notification.close();
-  event.waitUntil(clients.openWindow('/'));
+  event.waitUntil(
+    clients.openWindow('/')
+  );
 });
 
-console.log('🚀 Service Worker loaded with multi-strategy caching');
-console.log('📊 Real-time URLs:', CACHE_SETTINGS.realtime.patterns);
-console.log('⚡ Fast URLs:', CACHE_SETTINGS.fast.patterns);
-console.log('💾 Cached assets:', CACHE_SETTINGS.static.patterns);
+// ========== PERIODIC BACKGROUND SYNC (OPTIONAL) ==========
+// Auto update cache di background (butuh permission)
+self.addEventListener('periodicsync', event => {
+  if (event.tag === 'update-cache') {
+    event.waitUntil(updateCache());
+  }
+});
+
+async function updateCache() {
+  console.log('🔄 Periodic sync: Updating cache...');
+  const cache = await caches.open(CACHE_NAME);
+  const requests = await cache.keys();
+  
+  return Promise.all(
+    requests.map(async request => {
+      try {
+        const response = await fetch(request);
+        if (response && response.status === 200) {
+          await cache.put(request, response);
+        }
+      } catch (error) {
+        console.log('⚠️ Failed to update:', request.url);
+      }
+    })
+  );
+}
+
+console.log('🚀 Service Worker loaded with strategy:', CACHE_STRATEGY);
