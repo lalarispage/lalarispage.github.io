@@ -292,5 +292,4 @@ async function updateCache() {
     })
   );
 }
-
 console.log('🚀 Service Worker loaded with strategy:', CACHE_STRATEGY);
